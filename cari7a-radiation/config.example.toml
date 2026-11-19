@@ -1,0 +1,8 @@
+# Copy to config.toml (git-ignored) and edit. The CARI_DIR environment variable also works.
+# Folder of the unpacked CARI-7A distribution (the one containing CARI-7A.exe).
+cari_dir = "C:/Users/goldm/Downloads/cari_7Aexe/CARI_7A_DVD"
+exe = "CARI-7A.exe"
+# Private copy of the CARI files that runs actually use (the original install is never modified).
+work_dir = ".cari_work"
+# Each run's LOC/ANS/control files are archived here.
+runs_dir = "runs"

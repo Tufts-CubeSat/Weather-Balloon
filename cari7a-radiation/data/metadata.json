@@ -1,0 +1,33 @@
+{
+  "generated_utc": "2026-11-19T18:47:11+00:00",
+  "cari_version": "CARI-7A 4.2.0 (19 Oct 2021)",
+  "settings": {
+    "GCR_MODEL": 4,
+    "NVCR": 0,
+    "SUPERPOS": "NO!",
+    "VEHICLE": "NO! (unshielded)",
+    "time resolution": "monthly average (DD=00, H0)"
+  },
+  "site": {
+    "lat": 44.26,
+    "lon": -72.575,
+    "vertical_cutoff_gv": 1.77
+  },
+  "launch_month": "2026/11",
+  "heliocentric_potential_used": {
+    "mv": 639.0,
+    "source": "2026/09 (latest available)",
+    "fallback": true
+  },
+  "film": {
+    "stock": "Vision3 500T (5219/7219)",
+    "width_mm": 35.0,
+    "length_m": 30.5,
+    "frame_area_cm2": 4.644474,
+    "background_ugy_h": 0.1
+  },
+  "run_dirs (local, git-ignored)": [
+    "20261119-134435-dataset-sweep",
+    "20261119-134709-dataset-solar"
+  ]
+}

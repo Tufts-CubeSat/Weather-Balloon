@@ -1,0 +1,6 @@
+mission,description,max_alt_ft,duration_h,hours_above_60kft,absorbed_wb_ugy,absorbed_wb_sigma_ugy,si_0p3mm_ugy,si_0p5mm_ugy,equiv_ground_storage_days,fraction_of_measurable_fog,hze_hits_per_frame,proton_hits_per_frame,neutron_fluence_per_cm2
+helium_1200g_1.5kg,"1200 g latex, 1.5 kg, 5 m/s ascent; burst 105,689 ft",105689,2.2417,0.61667,5.862,0.36028,4.7723,4.6283,2.4425,0.01954,18.768,6998.7,29796
+solar_80kft_until_sunset,80 kft float until sunset at float (6.5 h) for launch 2026-11-21 13:00 UTC,80000,10.442,7.5028,47.025,3.0035,36.725,35.786,19.594,0.15675,194.11,64310,2.0277e+05
+solar_80kft_10h,80 kft float for 10 h (override),80000,13.925,10.986,66.367,4.2565,51.518,50.233,27.653,0.22122,288.78,92213,2.7832e+05
+solar_80kft_13h,80 kft float for 13 h (override),80000,16.925,13.986,83.026,5.3357,64.258,62.675,34.594,0.27675,370.31,1.1624e+05,3.4339e+05
+solar_80kft_16h,80 kft float for 16 h (override),80000,19.925,16.986,99.684,6.4149,76.998,75.117,41.535,0.33228,451.84,1.4028e+05,4.0845e+05
