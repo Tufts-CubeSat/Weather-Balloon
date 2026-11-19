@@ -25,8 +25,8 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 PHASE_COLORS = {"ascent": "#2a78d6", "burst": "#d64545", "float": "#e0a100", "descent": "#3a9b5c", "x": "#888"}
 
-st.set_page_config(page_title="Balloon Radiation Planner", page_icon="🎈", layout="wide")
-st.title("🎈 Balloon Radiation Planner")
+st.set_page_config(page_title="Balloon Radiation Planner", layout="wide")
+st.title("Balloon Radiation Planner")
 st.caption("Flight profile from balloon physics → galactic cosmic radiation from FAA CARI-7A → dose to the film payload.")
 
 
