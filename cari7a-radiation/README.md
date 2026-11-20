@@ -43,20 +43,68 @@ The sidebar's **Payload** sections describe the real hardware. These values feed
 
 | Input | What it affects |
 |---|---|
-| **Box & electronics:** outer dimensions, wall thickness, foam type (EPS/XPS), exterior finish (bare, white, foil, black); an editable electronics table (power × duty cycle); electronics and battery mass; battery type | Thermal model, payload mass |
+| **Box & electronics:** outer dimensions, wall thickness, foam type (EPS/XPS), exterior finish (bare, white, foil, black); an editable electronics table (DC power drawn from the battery × duty cycle); electronics and battery mass; battery type and energy (Wh); electronics surface area | Thermal model, payload mass |
 | **Film package:** preset (100 ft daylight spool in a plastic can, 400 ft core load in a bare or black metal can, 35mm cassette); inside or outside the box; can size, wall, material, surface absorptivity/emissivity; optional insulation wrap | Thermal model, payload mass, radiation shielding |
 | **Balloon:** the payload mass is computed from box + film package + rigging unless you untick "Use computed payload mass" | Burst/float altitude and timing |
 | **Radiation shielding:** derived from the can wall and insulation, plus the box wall if the film is inside it. Can be entered manually instead | CARI-7A dose |
 | **Launch & weather** (ground temperature, humidity, albedo) and **Ground operations** (payload temperature when taken outside, pre-launch hold, wait before recovery, wind) | Thermal model |
 
 The **Thermal** tab doesn't need a CARI run. It simulates the box interior and the film package along the flight, including the ground holds. Its outputs:
-- film minimum and maximum temperature, time below the cold limits, and the box/battery temperature range
-- a risk table: cold/brittle base, static marks if the film is advanced in flight, condensation or frost on descent and recovery, heat, and batteries below their rating
+- film minimum and maximum temperature, time below the cold limits, and the electronics/battery and box-air temperature ranges
+- a risk table: cold/brittle base, static marks if the film is advanced in flight, condensation or frost on descent and recovery, heat, batteries below their rating, and the battery running out
 - temperature and sunlight plots, and a CSV export
 
-The model is described in [`thermal.py`](thermal.py). It is a lumped model (one temperature per part) with sun, albedo, earth/sky infrared and convection. Its accuracy is about ±10–15 °C, so use it to compare designs rather than to predict exact temperatures.
+The model is described in [`thermal.py`](thermal.py). It is a lumped model with sun, albedo, earth/sky infrared and convection:
+- **Electronics and batteries** are one node, heated by their DC power until the battery's energy runs out.
+- **Box air** sits between the electronics and the foam. Heat reaches it by natural convection, which weakens as √pressure because the box is vented, and by internal infrared.
+- **Foam wall:** R = t / kA.
+
+Its accuracy is about ±10–15 °C, so use it to compare designs rather than to predict exact temperatures.
+
+**How much the box keeps the electronics warm** (default 30×25×20 cm EPS box, default flights; minimum electronics temperature):
+
+| DC power | Wall | Helium (~2.4 h) | Solar: at float / night descent |
+|---|---|---|---|
+| 2.55 W | ½" | −28 °C | −19 / −40 °C |
+| 5 W | 1" | −11 °C | −3 / −22 °C |
+| 5 W | 2" | +9 °C | +13 / −3 °C |
+| 10 W | 1" | +10 °C | +20 / 0 °C |
+
+Two things limit how warm a box stays:
+- **The wall is thin.** ½" EPS on this box is about 1.1 K/W, so each watt raises the interior only about 1 °C above the wall. Most of the gap between the electronics and the −56 °C air comes from the sun and the earth's infrared heating the box's outer surface.
+- **Battery energy caps the heat.** A 200 g lithium pack (~46 Wh) can supply only about 4 W on average over a 10+ hour solar day.
+
+Comparison with published data:
+- **Cooling rate:** the model's cool-down time constant (~35 min for 1" walls) matches a SparkFun freezer test, where a 1" foam box cooled from 25 to 0 °C in about 35 min.
+- **Flight minimums:** unheated foam boxes on 2–3 h flights typically reach −10 to −30 °C inside. The Indian Institute of Astrophysics lost a Raspberry Pi to the cold 40 min into a flight ([Safonova et al. 2015](https://arxiv.org/abs/1506.01538)). A sun-heated PET container stayed at −12 °C with −60 °C outside ([Crowe et al., GSBC 2015](https://www.aprs.org/balloons/SolarBalloon-TeamBALU.pdf)).
+- **Lumped models:** Embry-Riddle's lumped models (Isenberg et al., AHAC 2012; Meduvsky et al., AHAC 2013) found that the payload's thermal resistance rises at low pressure while its heat capacity doesn't change. This model captures that.
 
 Regenerate the dataset with `.venv\Scripts\python scripts\build_dataset.py` (about 7 minutes; see `--help` for site and date options). Run the tests with `.venv\Scripts\python -m pytest tests`.
+
+## Screenshots
+
+**Profile:** the sidebar inputs and the altitude profile of a 1200 g helium latex balloon.
+![Profile tab with the sidebar](docs/screenshots/overview.png)
+
+**Dose:** dose rate, cumulative dose with the CARI 1σ band, and dose rate vs altitude for a solar balloon.
+![Dose tab](docs/screenshots/dose.png)
+
+**Particles:** particle flux vs altitude and fluence per frame for the solar flight.
+![Particles tab](docs/screenshots/particles.png)
+
+**Film:** the flight dose against the fog thresholds, with everyday equivalents.
+![Film tab](docs/screenshots/film.png)
+
+**Thermal:** film and box temperatures, film-handling risks and sunlight along the solar flight.
+![Thermal tab](docs/screenshots/thermal.png)
+
+**Compare:** helium and solar flights side by side (one CARI run of each in the same session).
+![Compare tab](docs/screenshots/compare.png)
+
+**Dataset:** browsing the precomputed files in `data/`.
+![Dataset tab](docs/screenshots/dataset.png)
+
+Regenerate these with `scripts/take_screenshots.py` while the app is running (see the script's docstring for its separate venv with Playwright).
 
 ## Validation
 

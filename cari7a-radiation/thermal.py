@@ -1,8 +1,15 @@
 """Lumped-capacitance thermal model of the payload box and the film package.
 
 Thermal parts (each "node" is one lumped temperature):
-  * box interior: electronics + batteries + half the foam, heated by the electronics' average power.
-    Heat leaks out through the foam wall (R = t / (k A)) to the box's outer surface.
+  * electronics + batteries (+ the inner half of the foam): heated by the DC power the devices draw
+    from the battery, until the battery's energy runs out. Nearly all of that power ends up as heat
+    inside the box (only the radiated RF leaves, which is small).
+  * box interior air / inner wall: massless node between the electronics and the foam. Electronics
+    lose heat to it by natural convection inside the box (h ~ 2.5 W/m2K at sea level, falling as
+    sqrt(pressure) because the box is vented) plus internal infrared radiation. So electronics run
+    warmer than the box air, and more so at altitude. This internal resistance is often as large as
+    the foam wall's, and it lengthens the cooling time constant.
+  * foam wall: R = t / (k A) from the interior air to the box's outer surface.
   * film package: film + container. Either outside the box with its own outer surface, or
     inside the box, coupled to the interior air.
   * outer surfaces have no heat capacity: each step they are solved from an energy balance of
@@ -25,6 +32,18 @@ Environment along the flight profile:
 
 Accuracy: about +/-10-15 C. Use it to compare scenarios and spot risks, not to predict exact
 temperatures.
+
+Checks against published data:
+  * Isenberg et al. (AHAC 2012) and Meduvsky, Howeth, Katan & Isenberg (AHAC 2013), Embry-Riddle:
+    lumped R-C models of balloon gondolas validated on flights. Thermal resistance rises
+    significantly at low pressure, while capacitance stays roughly constant. Here that comes from
+    the sqrt(p) internal convection and the density-dependent outer convection.
+  * SparkFun freezer test: a 1 in foam box cooled from 25 to 0 C in ~35 min at about -18 C. This
+    model's time constant for a 1 in wall is ~35 min.
+  * Safonova et al. 2015 (arXiv:1506.01538): an under-insulated Raspberry Pi failed ~40 min into a
+    flight. Their -22 C cold-chamber test showed foam slows cooling but doesn't stop it.
+  * Crowe et al., GSBC 2015 (UNSW): a sun-heated transparent PET container bottomed at -12 C
+    with -60 C outside. White foam reflects most of the sun, so it gains less solar heat.
 """
 from __future__ import annotations
 
@@ -54,17 +73,17 @@ class Device:
         return self.power_w * self.duty
 
 
-DEFAULT_DEVICES = [
+DEFAULT_DEVICES = [  # DC input power drawn from the battery (not RF output). Measure yours!
     Device("SPOT GPS tracker", 0.05, 1.0),
-    Device("Radio transmitter", 1.0, 0.2),
+    Device("Radio transmitter (DC in while transmitting)", 2.5, 0.2),
     Device("Avionics board (radio + camera control)", 1.5, 1.0),
     Device("Camera", 1.0, 0.5),
 ]
 
-BATTERIES = {  # name: (specific heat J/kgK, lowest usable temperature C)
-    "Lithium primary AA (e.g. Energizer L91)": (900.0, -40.0),
-    "Li-ion / LiPo rechargeable": (1000.0, -20.0),
-    "Alkaline": (1000.0, -18.0),
+BATTERIES = {  # name: (specific heat J/kgK, lowest usable temperature C, usable energy Wh/kg)
+    "Lithium primary AA (e.g. Energizer L91)": (900.0, -40.0, 230.0),
+    "Li-ion / LiPo rechargeable": (1000.0, -20.0, 170.0),
+    "Alkaline": (1000.0, -18.0, 90.0),
 }
 
 
@@ -82,6 +101,29 @@ class BoxSpec:
     electronics_mass_kg: float = 0.3
     battery_mass_kg: float = 0.2
     battery_type: str = "Lithium primary AA (e.g. Energizer L91)"
+    battery_wh: float = 0.0  # usable energy; 0 = estimate from battery mass x type
+    component_area_m2: float = 0.0  # exposed surface of boards/batteries; 0 = estimate from mass
+    component_emissivity: float = 0.85
+
+    @property
+    def battery_energy_wh(self) -> float:
+        if self.battery_wh > 0:
+            return self.battery_wh
+        return self.battery_mass_kg * BATTERIES[self.battery_type][2]
+
+    @property
+    def component_area(self) -> float:
+        if self.component_area_m2 > 0:
+            return self.component_area_m2
+        # boards, camera bodies and battery packs: roughly 0.2 m2 of exposed surface per kg
+        return min(max(0.2 * (self.electronics_mass_kg + self.battery_mass_kg), 0.01), 0.8 * self.inner_area)
+
+    def internal_conductance(self, T_k: float, p_ratio: float) -> float:
+        """W/K from the electronics to the box interior air/inner wall (convection + IR)."""
+        h_nat = 2.5 * math.sqrt(max(p_ratio, 1e-4))
+        eps = 1.0 / (1.0 / self.component_emissivity + 1.0 / 0.9 - 1.0)
+        h_rad = 4.0 * eps * SIGMA * T_k ** 3
+        return self.component_area * (h_nat + h_rad)
 
     @property
     def outer_area(self) -> float:
@@ -324,10 +366,9 @@ def simulate(profile: pd.DataFrame, box: BoxSpec, film: FilmPackage, env: Enviro
     Ti = Tf = env.start_temp_c + 273.15
     Ts_box = Ts_film = Ti
     Cb, Cf = box.heat_capacity, film.heat_capacity
-    P = box.avg_power_w
+    P_avg = box.avg_power_w
+    energy_j = box.battery_energy_wh * 3600.0
     Rw = box.wall_resistance
-    # film inside box: coupled to interior air by weak natural convection (~3 W/m2K) + insulation
-    G_inside = 1.0 / (1.0 / (3.0 * film.area) + film.insulation_resistance) if film.location == "inside" else 0.0
 
     rows = []
     z_prev = z_at(times[0])
@@ -346,15 +387,28 @@ def simulate(profile: pd.DataFrame, box: BoxSpec, film: FilmPackage, env: Enviro
         e_up = pr * e_ground + (1 - pr) * OLR if not on_ground else e_ground
         e_sky = 0.75 * pr * SIGMA * Ta ** 4
         speed = max(v, env.ground_wind_mps if on_ground else env.min_airspeed_mps)
+        P = P_avg if energy_j > 0 else 0.0
+        energy_j -= P * dt_s
 
-        # box
+        # interior network: electronics --G_in-- air node --Rw-- outer surface;
+        # film (if inside) --G_f-- air node. Reduced to a Thevenin source for the surface solve.
+        G_in = box.internal_conductance(Ti, pr)
+        if film.location == "inside":
+            h_f = 2.5 * math.sqrt(pr) + 4.0 * 0.8 * SIGMA * Tf ** 3
+            G_f = 1.0 / (1.0 / (h_f * film.area) + film.insulation_resistance)
+        else:
+            G_f = 0.0
+        T_eq = (G_in * Ti + G_f * Tf) / (G_in + G_f)
+        R_eq = 1.0 / (G_in + G_f) + Rw
+
         Ab = box.outer_area
         qsol_b = I * Ab / 4 + env.ground_albedo * horiz * Ab / 4 * (0.5 if on_ground else 1.0)
         hb = h_conv(Ta, rho, speed, D_box)
-        Ts_box = _solve_surface(Ti, Rw, Ab, box.absorptivity, box.emissivity, qsol_b, e_up, e_sky, hb, Ta, Ts_box)
-        q_wall = (Ti - Ts_box) / Rw
+        Ts_box = _solve_surface(T_eq, R_eq, Ab, box.absorptivity, box.emissivity, qsol_b, e_up, e_sky, hb, Ta, Ts_box)
+        q_wall = (T_eq - Ts_box) / R_eq
+        T_air_in = Ts_box + q_wall * Rw
+        q_in = G_in * (Ti - T_air_in)
 
-        # film
         if film.location == "outside":
             Af = film.area
             qsol_f = I * Af / 4 + env.ground_albedo * horiz * Af / 4 * (0.5 if on_ground else 1.0)
@@ -362,19 +416,17 @@ def simulate(profile: pd.DataFrame, box: BoxSpec, film: FilmPackage, env: Enviro
             Ts_film = _solve_surface(Tf, film.insulation_resistance, Af, film.absorptivity, film.emissivity,
                                      qsol_f, e_up, e_sky, hf, Ta, Ts_film)
             q_film = (Tf - Ts_film) / film.insulation_resistance
-            q_box_film = 0.0
         else:
-            q_box_film = G_inside * (Ti - Tf)
-            q_film = -q_box_film
+            q_film = G_f * (Tf - T_air_in)
             Ts_film = Tf
 
-        rows.append((t, z, Ta, Ti, Ts_box, Tf, Ts_film, I, elev))
-        Ti += dt_s * (P - q_wall - q_box_film) / Cb
+        rows.append((t, z, Ta, Ti, T_air_in, Ts_box, Tf, Ts_film, I, elev, P, max(energy_j, 0.0) / 3600.0))
+        Ti += dt_s * (P - q_in) / Cb
         Tf += dt_s * (-q_film) / Cf
 
-    df = pd.DataFrame(rows, columns=["t_s", "alt_m", "T_air", "T_box", "T_box_surface", "T_film",
-                                     "T_film_surface", "sun_wm2", "sun_elev"])
-    for c in ["T_air", "T_box", "T_box_surface", "T_film", "T_film_surface"]:
+    df = pd.DataFrame(rows, columns=["t_s", "alt_m", "T_air", "T_box", "T_box_air", "T_box_surface", "T_film",
+                                     "T_film_surface", "sun_wm2", "sun_elev", "power_w", "battery_wh_left"])
+    for c in ["T_air", "T_box", "T_box_air", "T_box_surface", "T_film", "T_film_surface"]:
         df[c] = df[c] - 273.15
     df["t_min"] = df["t_s"] / 60.0
     df["alt_ft"] = df["alt_m"] / atm.M_PER_FT
@@ -410,6 +462,9 @@ def assess_film_thermal(sim: pd.DataFrame, box: BoxSpec, limits: FilmLimits) -> 
         "h_condensation": hours(cond_mask),
         "h_battery_too_cold": hours(sim["T_box"].to_numpy() < batt_min),
         "battery_min_rating_c": batt_min,
+        "box_air_min_c": float(sim["T_box_air"].min()),
+        "battery_empty_h": (float(sim.loc[sim["power_w"] <= 0, "t_s"].iloc[0]) / 3600.0
+                            if (sim["power_w"] <= 0).any() and box.avg_power_w > 0 else None),
         "dew_point_c": float(sim["dew_point_c"].iloc[0]),
     }
     risks = []
@@ -451,4 +506,9 @@ def assess_film_thermal(sim: pd.DataFrame, box: BoxSpec, limits: FilmLimits) -> 
         add("high", "Batteries too cold (inside box)",
             f"Box interior goes below the {batt_min:.0f} °C rating of {box.battery_type} for {res['h_battery_too_cold']:.1f} h. "
             "Expect tracker/radio dropouts. Use lithium primaries, add insulation, or add a heater.")
+    if res["battery_empty_h"] is not None:
+        add("high", "Battery runs out",
+            f"At {box.avg_power_w:.2f} W the {box.battery_energy_wh:.0f} Wh battery is empty "
+            f"{res['battery_empty_h']:.1f} h after launch (ground holds included). The electronics stop heating "
+            "the box after that. Cold also cuts usable capacity, especially for Li-ion and alkaline.")
     return {**res, "risks": risks}

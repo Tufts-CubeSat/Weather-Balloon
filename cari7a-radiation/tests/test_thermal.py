@@ -36,9 +36,34 @@ def test_power_warms_box_by_power_times_resistance():
     film = FilmPackage()
     a = simulate(ground_profile(4), box0, film, env).iloc[-1]
     b = simulate(ground_profile(4), box5, film, env).iloc[-1]
-    rise = (b["T_box"] - b["T_box_surface"])
-    assert rise == pytest.approx(5.0 * box5.wall_resistance, rel=0.05)
+    # foam wall: interior air sits P * R_wall above the outer surface
+    assert b["T_box_air"] - b["T_box_surface"] == pytest.approx(5.0 * box5.wall_resistance, rel=0.05)
+    # electronics sit a further P / G_internal above the interior air
+    g_in = box5.internal_conductance(b["T_box"] + 273.15, 1.0)
+    assert b["T_box"] - b["T_box_air"] == pytest.approx(5.0 / g_in, rel=0.08)
     assert b["T_box"] > a["T_box"] + 3
+
+
+def test_internal_coupling_weakens_with_altitude():
+    box = BoxSpec()
+    assert box.internal_conductance(250.0, 0.05) < 0.8 * box.internal_conductance(250.0, 1.0)
+
+
+def test_battery_runs_out_and_heating_stops():
+    env = Environment(surface_temp_c=0.0, start_temp_c=0.0, prelaunch_min=0, postlanding_min=0)
+    box = BoxSpec(devices=[Device("heater", 10.0, 1.0)], battery_wh=10.0)  # 1 h of power
+    sim = simulate(ground_profile(4), box, FilmPackage(), env)
+    a = assess_film_thermal(sim, box, FilmLimits())
+    assert a["battery_empty_h"] == pytest.approx(1.0, abs=0.02)
+    assert sim["power_w"].iloc[-1] == 0.0
+    assert any(r["risk"] == "Battery runs out" for r in a["risks"])
+    # after the battery dies the electronics relax back toward ambient
+    assert sim["T_box"].iloc[-1] < sim["T_box"].max() - 5
+
+
+def test_default_battery_energy_from_mass():
+    box = BoxSpec(battery_mass_kg=0.2)
+    assert box.battery_energy_wh == pytest.approx(0.2 * 230.0)
 
 
 def test_insulation_slows_film_cooling_in_flight():

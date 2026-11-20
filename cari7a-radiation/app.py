@@ -92,7 +92,9 @@ with st.sidebar:
         finish = st.selectbox("Exterior finish", list(FINISHES))
         fk, fdens, fa_, fe_ = FOAMS[foam]
         ba, be = FINISHES[finish] or (fa_, fe_)
-        st.caption("Electronics (edit the table: average power = power × duty)")
+        st.caption("Electronics: enter the **DC power drawn from the battery** (e.g. measured with a USB power "
+                   "meter), not RF output. A 1 W transmitter draws ~2.5–3 W. Average = power × duty. "
+                   "Add a row for a resistive heater if you fly one.")
         dev_df = st.data_editor(
             pd.DataFrame([vars(d) for d in DEFAULT_DEVICES]).rename(
                 columns={"name": "device", "power_w": "power (W)", "duty": "duty (0-1)"}),
@@ -103,11 +105,22 @@ with st.sidebar:
         elec_mass = c1.number_input("Electronics mass (kg)", 0.0, 5.0, 0.30, 0.05)
         batt_mass = c2.number_input("Battery mass (kg)", 0.0, 5.0, 0.20, 0.05)
         batt_type = st.selectbox("Battery type", list(BATTERIES))
+        c1, c2 = st.columns(2)
+        batt_wh = c1.number_input("Battery energy (Wh, 0 = estimate)", 0.0, 1000.0, 0.0, 5.0,
+                                  help="Usable energy of the whole pack. 0 estimates it from mass × type "
+                                       "(L91 ≈ 230 Wh/kg, Li-ion ≈ 170, alkaline ≈ 90). When it runs out the "
+                                       "electronics stop heating the box.")
+        comp_cm2 = c2.number_input("Electronics surface (cm², 0 = estimate)", 0.0, 20000.0, 0.0, 100.0,
+                                   help="Exposed surface of boards, camera and battery packs that sheds heat into "
+                                        "the box air. 0 estimates ~2000 cm² per kg. Smaller = electronics run "
+                                        "warmer than the box air.")
         box = BoxSpec(length_cm=bl, width_cm=bw, height_cm=bh, wall_cm=wall_in * 2.54, foam_k=fk,
                       foam_density=fdens, absorptivity=ba, emissivity=be, devices=devices,
-                      electronics_mass_kg=elec_mass, battery_mass_kg=batt_mass, battery_type=batt_type)
-        st.caption(f"Average power **{box.avg_power_w:.2f} W** · box mass **{box.mass_kg:.2f} kg** "
-                   f"(foam {box.foam_mass_kg * 1000:.0f} g)")
+                      electronics_mass_kg=elec_mass, battery_mass_kg=batt_mass, battery_type=batt_type,
+                      battery_wh=batt_wh, component_area_m2=comp_cm2 / 1e4)
+        runtime = (f" (≈ {box.battery_energy_wh / box.avg_power_w:.1f} h at this draw)" if box.avg_power_w > 0 else "")
+        st.caption(f"Average power **{box.avg_power_w:.2f} W** · battery **{box.battery_energy_wh:.0f} Wh**{runtime} · "
+                   f"box mass **{box.mass_kg:.2f} kg** (foam {box.foam_mass_kg * 1000:.0f} g)")
 
     with st.expander("Payload: film package", expanded=False):
         preset = st.selectbox("Package", list(FILM_PACKAGES))
@@ -427,8 +440,9 @@ with tabs[4]:
                 f"{ta['h_below_severe']:.1f} h below {limits.severe_cold_c:.0f} °C", delta_color="off")
     c[2].metric("Film maximum", f"{ta['film_max_c']:.0f} °C",
                 f"{ta['h_above_storage']:.1f} h above {limits.warm_storage_c:.0f} °C", delta_color="off")
-    c[3].metric("Box interior range", f"{ta['box_min_c']:.0f} to {ta['box_max_c']:.0f} °C",
-                f"batteries rated to {ta['battery_min_rating_c']:.0f} °C", delta_color="off")
+    c[3].metric("Electronics/batteries", f"{ta['box_min_c']:.0f} to {ta['box_max_c']:.0f} °C",
+                f"box air min {ta['box_air_min_c']:.0f} °C · rated to {ta['battery_min_rating_c']:.0f} °C",
+                delta_color="off")
 
     risk_df = pd.DataFrame(ta["risks"])
     risk_df["level"] = risk_df["level"].map(LEVEL_ICON)
@@ -438,7 +452,8 @@ with tabs[4]:
     x = sim["t_min"] / 60
     fig = go.Figure()
     fig.add_scatter(x=x, y=sim["T_air"], name="Outside air", line=dict(color="#9aa4b2", dash="dot"))
-    fig.add_scatter(x=x, y=sim["T_box"], name="Box interior (electronics/batteries)", line=dict(color="#2a78d6"))
+    fig.add_scatter(x=x, y=sim["T_box"], name="Electronics/batteries", line=dict(color="#2a78d6"))
+    fig.add_scatter(x=x, y=sim["T_box_air"], name="Box interior air", line=dict(color="#2a78d6", dash="dash", width=1))
     fig.add_scatter(x=x, y=sim["T_film"], name="Film", line=dict(color="#d64545", width=3))
     fig.add_scatter(x=x, y=sim["alt_ft"] / 1000, name="Altitude (kft)", yaxis="y2",
                     line=dict(color="#3a9b5c", width=1), opacity=0.5)
@@ -464,10 +479,15 @@ with tabs[4]:
     with st.expander("Model details and energy budget"):
         st.markdown(
             f"- Box: {box.length_cm:.0f}×{box.width_cm:.0f}×{box.height_cm:.0f} cm, {box.wall_cm / 2.54:.2f} in walls, "
-            f"k = {box.foam_k} W/m·K → wall conductance **{1 / box.wall_resistance:.2f} W/K**. "
-            f"Heat capacity {box.heat_capacity:.0f} J/K → time constant ≈ {box.heat_capacity * box.wall_resistance / 60:.0f} min "
-            f"(conduction only). Steady state with {box.avg_power_w:.2f} W ≈ **{box.avg_power_w * box.wall_resistance:.1f} °C** "
-            "above the outer surface temperature.\n"
+            f"k = {box.foam_k} W/m·K → foam wall **{box.wall_resistance:.2f} K/W**. Electronics → box air "
+            f"(surface {box.component_area * 1e4:.0f} cm²): **{1 / box.internal_conductance(288, 1):.2f} K/W** at sea level, "
+            f"**{1 / box.internal_conductance(240, 0.05):.2f} K/W** at ~20 km.\n"
+            f"- Steady state with {box.avg_power_w:.2f} W: box air ≈ {box.avg_power_w * box.wall_resistance:.1f} °C and "
+            f"electronics ≈ **{box.avg_power_w * (box.wall_resistance + 1 / box.internal_conductance(240, 0.05)):.1f} °C** "
+            "above the outer surface at altitude. The outer surface itself sits near radiative balance "
+            "(sun + earth infrared vs. emission), well above the −56 °C air in daylight.\n"
+            f"- Heat capacity {box.heat_capacity:.0f} J/K. Battery {box.battery_energy_wh:.0f} Wh"
+            + (f", empty after {ta['battery_empty_h']:.1f} h.\n" if ta["battery_empty_h"] is not None else ", lasts the whole flight.\n") +
             f"- Film package: {film_pkg.mass_kg * 1000:.0f} g, heat capacity {film_pkg.heat_capacity:.0f} J/K, "
             f"surface area {film_pkg.area * 1e4:.0f} cm², absorptivity/emissivity {film_pkg.absorptivity}/{film_pkg.emissivity}.\n"
             "- Low-emissivity (bare metal, foil) surfaces lose very little heat by radiation, so they stay warmer at night "
