@@ -31,10 +31,30 @@ On the first run, the needed CARI files are copied into `.cari_work/`. **Your or
 - **Tabs:**
   - **Profile:** the altitude/time profile.
   - **Dose:** rate and cumulative dose with the CARI 1σ band, plus CSV/LOC/ANS downloads.
+  - **Thermal:** film and box temperatures and film-handling risks (see below).
   - **Particles:** flux vs altitude and fluence per frame/roll.
   - **Film:** dose vs fog thresholds and equivalents.
   - **Compare:** helium vs solar. Run each type once in the same browser session.
   - **Dataset:** browse the `data/` files.
+
+### Payload, thermal and film-temperature inputs
+
+The sidebar's **Payload** sections describe the real hardware. These values feed the whole app:
+
+| Input | What it affects |
+|---|---|
+| **Box & electronics:** outer dimensions, wall thickness, foam type (EPS/XPS), exterior finish (bare, white, foil, black); an editable electronics table (power × duty cycle); electronics and battery mass; battery type | Thermal model, payload mass |
+| **Film package:** preset (100 ft daylight spool in a plastic can, 400 ft core load in a bare or black metal can, 35mm cassette); inside or outside the box; can size, wall, material, surface absorptivity/emissivity; optional insulation wrap | Thermal model, payload mass, radiation shielding |
+| **Balloon:** the payload mass is computed from box + film package + rigging unless you untick "Use computed payload mass" | Burst/float altitude and timing |
+| **Radiation shielding:** derived from the can wall and insulation, plus the box wall if the film is inside it. Can be entered manually instead | CARI-7A dose |
+| **Launch & weather** (ground temperature, humidity, albedo) and **Ground operations** (payload temperature when taken outside, pre-launch hold, wait before recovery, wind) | Thermal model |
+
+The **Thermal** tab doesn't need a CARI run. It simulates the box interior and the film package along the flight, including the ground holds. Its outputs:
+- film minimum and maximum temperature, time below the cold limits, and the box/battery temperature range
+- a risk table: cold/brittle base, static marks if the film is advanced in flight, condensation or frost on descent and recovery, heat, and batteries below their rating
+- temperature and sunlight plots, and a CSV export
+
+The model is described in [`thermal.py`](thermal.py). It is a lumped model (one temperature per part) with sun, albedo, earth/sky infrared and convection. Its accuracy is about ±10–15 °C, so use it to compare designs rather than to predict exact temperatures.
 
 Regenerate the dataset with `.venv\Scripts\python scripts\build_dataset.py` (about 7 minutes; see `--help` for site and date options). Run the tests with `.venv\Scripts\python -m pytest tests`.
 
@@ -72,7 +92,7 @@ Recommendations:
 - **Galactic cosmic rays only.** Solar particle events are not included (CARI-7A can model them with a user spectrum). Doses are monthly averages, with no Forbush or Kp adjustment.
 - **"Absorbed dose" means CARI's whole-body average for tissue,** used as a proxy for gelatin emulsion. Dose in 0.3/0.5 mm silicon is shown alongside and is about 20% lower.
 - **Fixed launch lat/lon (no drift).** The geomagnetic cutoff changes little over typical balloon drift distances.
-- **Shielding is approximate,** set through CARI's `VEHICLE.DAT` (Al and HDPE g/cm²). The default is unshielded. The thin walls of a foam box barely matter.
+- **Shielding is approximate,** set through CARI's `VEHICLE.DAT` (Al and HDPE g/cm²). By default it is derived from the film package. Can walls and foam are only about 0.1 g/cm², so they barely change the dose.
 - **Balloon models are first-order.**
   - Latex balloons use HabHub-style physics.
   - Solar balloons depend heavily on ΔT (5–60 K slider). Their float time depends on the season: in late November at 44°N it is only about 6.5–7 h of sun at float, so 10–16 h floats need a longer day or a different latitude.
